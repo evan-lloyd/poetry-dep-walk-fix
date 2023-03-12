@@ -12,6 +12,7 @@ import re
 import subprocess
 import sys
 import sysconfig
+import threading
 import warnings
 
 from contextlib import contextmanager
@@ -514,6 +515,8 @@ class EnvManager:
     _env = None
 
     ENVS_FILE = "envs.toml"
+
+    CREATE_LOCK = threading.Lock()
 
     def __init__(self, poetry: Poetry, io: None | IO = None) -> None:
         self._poetry = poetry
@@ -1122,7 +1125,9 @@ class EnvManager:
 
         args.append(str(path))
 
-        cli_result = virtualenv.cli_run(args)
+        # workaround for https://github.com/pypa/virtualenv/issues/2516
+        with cls.CREATE_LOCK:
+            cli_result = virtualenv.cli_run(args)
 
         # Exclude the venv folder from from macOS Time Machine backups
         # TODO: Add backup-ignore markers for other platforms too
