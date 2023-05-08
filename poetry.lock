@@ -1092,7 +1092,7 @@ importlib-metadata = {version = ">=1.7.0", markers = "python_version < \"3.8\""}
 type = "git"
 url = "https://github.com/radoering/poetry-core.git"
 reference = "main"
-resolved_reference = "f314393bb9780f2381db7794c98e678344fad7ec"
+resolved_reference = "1493c48570df4564eb2a72c9936554a634cefcf4"
 
 [[package]]
 name = "poetry-plugin-export"
