@@ -144,6 +144,15 @@ class Chef:
                 else:
                     message_parts.append(str(e.exception))
 
+                message_parts.append(f"Python: {env.python_executable}")
+                message_parts.append(
+                    f"build system requires: {builder.build_system_requires}"
+                )
+                site_packages = (  # Windows specific path!
+                    Path(env.python_executable).parent.parent / "Lib" / "site-packages"
+                )
+                message_parts.append(f"site packages: {list(site_packages.iterdir())}")
+
                 error = ChefBuildError("\n\n".join(message_parts))
 
             if error is not None:
