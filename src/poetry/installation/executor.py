@@ -20,6 +20,7 @@ from requests.utils import atomic_open
 
 from poetry.installation.chef import Chef
 from poetry.installation.chef import ChefBuildError
+from poetry.installation.chef import ChefError
 from poetry.installation.chooser import Chooser
 from poetry.installation.operations import Install
 from poetry.installation.operations import Uninstall
@@ -334,6 +335,9 @@ class Executor:
                             f" running '{pip_command} \"{requirement}\"'."
                             "</info>"
                         )
+                    elif isinstance(e, ChefError):
+                        io.write_line("")
+                        io.write_line("<info>some other explaining text</info>")
                     elif isinstance(e, SolverProblemError):
                         pkg = operation.package
                         io.write_line("")
