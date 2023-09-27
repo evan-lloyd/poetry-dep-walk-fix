@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from build import BuildBackendException
 from build import ProjectBuilder
 from build.env import IsolatedEnv as BaseIsolatedEnv
+from cleo.io.buffered_io import BufferedIO
 from poetry.core.utils.helpers import temporary_directory
 from pyproject_hooks import quiet_subprocess_runner  # type: ignore[import]
 
@@ -57,7 +58,6 @@ class IsolatedEnv(BaseIsolatedEnv):
         }
 
     def install(self, requirements: Collection[str]) -> None:
-        from cleo.io.null_io import NullIO
         from poetry.core.packages.dependency import Dependency
         from poetry.core.packages.project_package import ProjectPackage
 
@@ -73,8 +73,9 @@ class IsolatedEnv(BaseIsolatedEnv):
             dependency = Dependency.create_from_pep_508(requirement)
             package.add_dependency(dependency)
 
+        io = BufferedIO()
         installer = Installer(
-            NullIO(),
+            io,
             self._env,
             package,
             Locker(self._env.path.joinpath("poetry.lock"), {}),
@@ -83,7 +84,10 @@ class IsolatedEnv(BaseIsolatedEnv):
             InstalledRepository.load(self._env),
         )
         installer.update(True)
-        installer.run()
+        if installer.run() != 0:
+            raise ChefError(
+                f"install failure\nout: {io.fetch_output()}\nerror: {io.fetch_error()}"
+            )
 
 
 class Chef:
