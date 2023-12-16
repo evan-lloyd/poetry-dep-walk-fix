@@ -32,6 +32,8 @@ if TYPE_CHECKING:
 
     from poetry.core.packages.project_package import ProjectPackage
 
+    from poetry.inspection.lazy_wheel import MemoryWheel
+
 
 logger = logging.getLogger(__name__)
 
@@ -231,9 +233,7 @@ class PackageInfo:
         return package
 
     @classmethod
-    def _from_distribution(
-        cls, dist: pkginfo.BDist | pkginfo.SDist | pkginfo.Wheel
-    ) -> PackageInfo:
+    def _from_distribution(cls, dist: pkginfo.Distribution) -> PackageInfo:
         """
         Helper method to parse package information from a `pkginfo.Distribution`
         instance.
@@ -244,7 +244,7 @@ class PackageInfo:
 
         if dist.requires_dist:
             requirements = list(dist.requires_dist)
-        else:
+        elif isinstance(dist, (pkginfo.BDist, pkginfo.SDist, pkginfo.Wheel)):
             requires = Path(dist.filename) / "requires.txt"
             if requires.exists():
                 text = requires.read_text(encoding="utf-8")
@@ -258,8 +258,9 @@ class PackageInfo:
             requires_python=dist.requires_python,
         )
 
-        info._source_type = "file"
-        info._source_url = Path(dist.filename).resolve().as_posix()
+        if isinstance(dist, (pkginfo.BDist, pkginfo.SDist, pkginfo.Wheel)):
+            info._source_type = "file"
+            info._source_url = Path(dist.filename).resolve().as_posix()
 
         return info
 
@@ -521,6 +522,15 @@ class PackageInfo:
             return cls._from_distribution(wheel)
         except ValueError:
             return PackageInfo()
+
+    @classmethod
+    def from_memory_wheel(cls, wheel: MemoryWheel) -> PackageInfo:
+        """
+        Gather package information from a partial fetched wheel kept in memory.
+
+        :param path: Path to wheel.
+        """
+        return cls._from_distribution(wheel)
 
     @classmethod
     def from_bdist(cls, path: Path) -> PackageInfo:
