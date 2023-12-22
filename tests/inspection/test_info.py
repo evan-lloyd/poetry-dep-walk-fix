@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from subprocess import CalledProcessError
 from typing import TYPE_CHECKING
+from zipfile import ZipFile
 
 import pytest
-import requests
+
+from packaging.metadata import Metadata
 
 from poetry.inspection.info import PackageInfo
 from poetry.inspection.info import PackageInfoError
-from poetry.inspection.lazy_wheel import MemoryWheel
-from poetry.inspection.lazy_wheel import memory_wheel_from_url
 from poetry.utils.env import EnvCommandError
 from poetry.utils.env import VirtualEnv
 
@@ -17,10 +17,8 @@ from poetry.utils.env import VirtualEnv
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from httpretty import httpretty
     from pytest_mock import MockerFixture
 
-    from tests.inspection.conftest import RequestCallbackFactory
     from tests.types import FixtureDirGetter
 
 
@@ -40,15 +38,9 @@ def demo_wheel(fixture_dir: FixtureDirGetter) -> Path:
 
 
 @pytest.fixture
-def demo_memory_wheel(
-    http: type[httpretty],
-    handle_request_factory: RequestCallbackFactory,
-) -> MemoryWheel:
-    url = "https://foo.com/demo-0.1.0-py2.py3-none-any.whl"
-    request_callback = handle_request_factory()
-    http.register_uri(http.GET, url, body=request_callback)
-
-    return memory_wheel_from_url("demo", url, requests.Session())
+def demo_wheel_metadata(demo_wheel: Path) -> Metadata:
+    with ZipFile(demo_wheel) as zf:
+        return Metadata.from_email(zf.read("demo-0.1.0.dist-info/METADATA"))
 
 
 @pytest.fixture
@@ -108,6 +100,7 @@ def demo_check_info(info: PackageInfo, requires_dist: set[str] | None = None) ->
     assert info.name == "demo"
     assert info.version == "0.1.0"
     assert info.requires_dist
+    assert info.requires_python is None or isinstance(info.requires_python, str)
 
     if requires_dist:
         assert set(info.requires_dist) == requires_dist
@@ -124,6 +117,12 @@ def demo_check_info(info: PackageInfo, requires_dist: set[str] | None = None) ->
                 'cleo ; extra == "foo"',
                 "pendulum (>=1.4.4)",
                 'tomlkit ; extra == "bar"',
+            },
+            # metadata parsed by packaging.metadata instead of pkginfo
+            {
+                'cleo; extra == "foo"',
+                "pendulum>=1.4.4",
+                'tomlkit; extra == "bar"',
             },
         )
 
@@ -150,8 +149,8 @@ def test_info_from_wheel(demo_wheel: Path) -> None:
     assert info._source_url == demo_wheel.resolve().as_posix()
 
 
-def test_info_from_memory_wheel(demo_memory_wheel: MemoryWheel) -> None:
-    info = PackageInfo.from_memory_wheel(demo_memory_wheel)
+def test_info_from_wheel_metadata(demo_wheel_metadata: Metadata) -> None:
+    info = PackageInfo.from_wheel_metadata(demo_wheel_metadata)
     demo_check_info(info)
     assert info._source_type is None
     assert info._source_url is None

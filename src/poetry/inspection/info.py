@@ -30,9 +30,8 @@ from poetry.utils.setup_reader import SetupReader
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from packaging.metadata import Metadata
     from poetry.core.packages.project_package import ProjectPackage
-
-    from poetry.inspection.lazy_wheel import MemoryWheel
 
 
 logger = logging.getLogger(__name__)
@@ -233,7 +232,9 @@ class PackageInfo:
         return package
 
     @classmethod
-    def _from_distribution(cls, dist: pkginfo.Distribution) -> PackageInfo:
+    def _from_distribution(
+        cls, dist: pkginfo.BDist | pkginfo.SDist | pkginfo.Wheel
+    ) -> PackageInfo:
         """
         Helper method to parse package information from a `pkginfo.Distribution`
         instance.
@@ -244,7 +245,7 @@ class PackageInfo:
 
         if dist.requires_dist:
             requirements = list(dist.requires_dist)
-        elif isinstance(dist, (pkginfo.BDist, pkginfo.SDist, pkginfo.Wheel)):
+        else:
             requires = Path(dist.filename) / "requires.txt"
             if requires.exists():
                 text = requires.read_text(encoding="utf-8")
@@ -258,9 +259,8 @@ class PackageInfo:
             requires_python=dist.requires_python,
         )
 
-        if isinstance(dist, (pkginfo.BDist, pkginfo.SDist, pkginfo.Wheel)):
-            info._source_type = "file"
-            info._source_url = Path(dist.filename).resolve().as_posix()
+        info._source_type = "file"
+        info._source_url = Path(dist.filename).resolve().as_posix()
 
         return info
 
@@ -524,13 +524,22 @@ class PackageInfo:
             return PackageInfo()
 
     @classmethod
-    def from_memory_wheel(cls, wheel: MemoryWheel) -> PackageInfo:
+    def from_wheel_metadata(cls, metadata: Metadata) -> PackageInfo:
         """
-        Gather package information from a partial fetched wheel kept in memory.
+        Gather package information from metadata of a remote wheel.
 
-        :param path: Path to wheel.
+        :param metadata: metadata of the wheel.
         """
-        return cls._from_distribution(wheel)
+        requirements = None
+        if metadata.requires_dist:
+            requirements = [str(req) for req in metadata.requires_dist]
+        return cls(
+            name=metadata.name,
+            version=str(metadata.version),
+            summary=metadata.summary,
+            requires_dist=requirements,
+            requires_python=str(metadata.requires_python),
+        )
 
     @classmethod
     def from_bdist(cls, path: Path) -> PackageInfo:
