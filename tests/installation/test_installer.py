@@ -1116,7 +1116,7 @@ def test_installer_with_pypi_repository(
     assert result == 0
 
     expected = fixture("with-pypi-repository")
-    assert expected == locker.written_data
+    assert locker.written_data == expected
 
 
 def test_run_installs_with_local_file(

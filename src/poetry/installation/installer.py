@@ -22,12 +22,14 @@ if TYPE_CHECKING:
 
     from cleo.io.io import IO
     from packaging.utils import NormalizedName
+    from poetry.core.packages.package import Package
     from poetry.core.packages.path_dependency import PathDependency
     from poetry.core.packages.project_package import ProjectPackage
 
     from poetry.config.config import Config
     from poetry.installation.operations.operation import Operation
     from poetry.packages import Locker
+    from poetry.puzzle.solver import SolverPackageInfo
     from poetry.utils.env import Env
 
 
@@ -198,12 +200,9 @@ class Installer:
         with solver.provider.use_source_root(
             source_root=self._env.path.joinpath("src")
         ):
-            ops = solver.solve(use_latest=use_latest).calculate_operations()
+            solved_packages = solver.solve(use_latest=use_latest).get_solved_packages()
 
-        lockfile_repo = LockfileRepository()
-        self._populate_lockfile_repo(lockfile_repo, ops)
-
-        self._write_lock_file(lockfile_repo, force=True)
+        self._write_lock_file(solved_packages, force=True)
 
         return 0
 
@@ -238,7 +237,14 @@ class Installer:
             with solver.provider.use_source_root(
                 source_root=self._env.path.joinpath("src")
             ):
-                ops = solver.solve(use_latest=self._whitelist).calculate_operations()
+                solution = solver.solve(use_latest=self._whitelist)
+                solved_packages = solution.get_solved_packages()
+                ops = solution.calculate_operations()
+
+            if not self.executor.enabled:
+                # If we are only in lock mode, no need to go any further
+                self._write_lock_file(solved_packages)
+                return 0
         else:
             self._io.write_line("<info>Installing dependencies from lock file</>")
 
@@ -265,11 +271,6 @@ class Installer:
 
         lockfile_repo = LockfileRepository()
         uninstalls = self._populate_lockfile_repo(lockfile_repo, ops)
-
-        if not self.executor.enabled:
-            # If we are only in lock mode, no need to go any further
-            self._write_lock_file(lockfile_repo)
-            return 0
 
         if self._groups is not None:
             root = self._package.with_dependency_groups(list(self._groups), only=True)
@@ -311,7 +312,7 @@ class Installer:
 
             transaction = Transaction(
                 locked_repository.packages,
-                [(package, 0) for package in lockfile_repo.packages],
+                lockfile_repo.packages,
                 installed_packages=self._installed_repository.packages,
                 root_package=root,
             )
@@ -341,13 +342,17 @@ class Installer:
 
         if status == 0 and self._update:
             # Only write lock file when installation is success
-            self._write_lock_file(lockfile_repo)
+            self._write_lock_file(solved_packages)
 
         return status
 
-    def _write_lock_file(self, repo: LockfileRepository, force: bool = False) -> None:
+    def _write_lock_file(
+        self,
+        packages: dict[Package, SolverPackageInfo],
+        force: bool = False,
+    ) -> None:
         if not self.is_dry_run() and (force or self._update):
-            updated_lock = self._locker.set_lock_data(self._package, repo.packages)
+            updated_lock = self._locker.set_lock_data(self._package, packages)
 
             if updated_lock:
                 self._io.write_line("")

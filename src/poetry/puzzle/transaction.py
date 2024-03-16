@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import TYPE_CHECKING
 
 
@@ -7,13 +8,14 @@ if TYPE_CHECKING:
     from poetry.core.packages.package import Package
 
     from poetry.installation.operations.operation import Operation
+    from poetry.puzzle.solver import SolverPackageInfo
 
 
 class Transaction:
     def __init__(
         self,
         current_packages: list[Package],
-        result_packages: list[tuple[Package, int]],
+        result_packages: list[Package] | dict[Package, SolverPackageInfo],
         installed_packages: list[Package] | None = None,
         root_package: Package | None = None,
     ) -> None:
@@ -25,6 +27,10 @@ class Transaction:
 
         self._installed_packages = installed_packages
         self._root_package = root_package
+
+    def get_solved_packages(self) -> dict[Package, SolverPackageInfo]:
+        assert isinstance(self._result_packages, dict)
+        return self._result_packages
 
     def calculate_operations(
         self,
@@ -39,7 +45,13 @@ class Transaction:
 
         operations: list[Operation] = []
 
-        for result_package, priority in self._result_packages:
+        if isinstance(self._result_packages, dict):
+            priorities = {
+                pkg: info.depth for pkg, info in self._result_packages.items()
+            }
+        else:
+            priorities = defaultdict(int)
+        for result_package in self._result_packages:
             installed = False
 
             for installed_package in self._installed_packages:
@@ -65,7 +77,11 @@ class Transaction:
                         and not result_package.is_same_package_as(installed_package)
                     ):
                         operations.append(
-                            Update(installed_package, result_package, priority=priority)
+                            Update(
+                                installed_package,
+                                result_package,
+                                priority=priorities[result_package],
+                            )
                         )
                     else:
                         operations.append(
@@ -78,14 +94,16 @@ class Transaction:
                 installed
                 or (skip_directory and result_package.source_type == "directory")
             ):
-                operations.append(Install(result_package, priority=priority))
+                operations.append(
+                    Install(result_package, priority=priorities[result_package])
+                )
 
         if with_uninstalls:
             uninstalls: set[str] = set()
             for current_package in self._current_packages:
                 found = any(
                     current_package.name == result_package.name
-                    for result_package, _ in self._result_packages
+                    for result_package in self._result_packages
                 )
 
                 if not found:
@@ -96,7 +114,7 @@ class Transaction:
 
             if synchronize:
                 result_package_names = {
-                    result_package.name for result_package, _ in self._result_packages
+                    result_package.name for result_package in self._result_packages
                 }
                 # We preserve pip when not managed by poetry, this is done to avoid
                 # externally managed virtual environments causing unnecessary removals.
