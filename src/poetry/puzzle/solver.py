@@ -4,10 +4,13 @@ import time
 
 from collections import defaultdict
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from typing import FrozenSet
 from typing import Tuple
 from typing import TypeVar
+
+from poetry.core.version.markers import AnyMarker
 
 from poetry.mixology import resolve_version
 from poetry.mixology.failure import SolveFailure
@@ -27,10 +30,18 @@ if TYPE_CHECKING:
     from poetry.core.packages.dependency import Dependency
     from poetry.core.packages.package import Package
     from poetry.core.packages.project_package import ProjectPackage
+    from poetry.core.version.markers import BaseMarker
 
     from poetry.puzzle.transaction import Transaction
     from poetry.repositories import RepositoryPool
     from poetry.utils.env import Env
+
+
+@dataclass
+class SolverPackageInfo:
+    depth: int
+    groups: set[str]
+    transitive_marker: BaseMarker
 
 
 class Solver:
@@ -69,7 +80,7 @@ class Solver:
 
         with self._progress(), self._provider.use_latest_for(use_latest or []):
             start = time.time()
-            packages, depths = self._solve()
+            packages = self._solve()
             end = time.time()
 
             if len(self._overrides) > 1:
@@ -96,7 +107,7 @@ class Solver:
 
         return Transaction(
             self._locked_packages,
-            list(zip(packages, depths)),
+            packages,
             installed_packages=self._installed_packages,
             root_package=self._package,
         )
@@ -120,9 +131,8 @@ class Solver:
     def _solve_in_compatibility_mode(
         self,
         overrides: tuple[dict[Package, dict[str, Dependency]], ...],
-    ) -> tuple[list[Package], list[int]]:
-        packages = []
-        depths = []
+    ) -> dict[Package, SolverPackageInfo]:
+        packages: dict[Package, SolverPackageInfo] = {}
         for override in overrides:
             self._provider.debug(
                 # ignore the warning as provider does not do interpolation
@@ -130,24 +140,29 @@ class Solver:
                 f"with the following overrides ({override}).</comment>"
             )
             self._provider.set_overrides(override)
-            _packages, _depths = self._solve()
-            for index, package in enumerate(_packages):
-                if package not in packages:
-                    packages.append(package)
-                    depths.append(_depths[index])
-                    continue
+            new_packages = self._solve()
+            for new_package, new_package_info in new_packages.items():
+                if package_info := packages.get(new_package):
+                    # update existing package
+                    package_info.depth = max(package_info.depth, new_package_info.depth)
+                    package_info.groups.update(new_package_info.groups)
+                    package_info.transitive_marker = (
+                        package_info.transitive_marker.union(
+                            new_package_info.transitive_marker
+                        )
+                    )
+                    for package in packages:
+                        if package == new_package:
+                            for dep in new_package.requires:
+                                if dep not in package.requires:
+                                    package.add_dependency(dep)
+
                 else:
-                    idx = packages.index(package)
-                    pkg = packages[idx]
-                    depths[idx] = max(depths[idx], _depths[index])
+                    packages[new_package] = new_package_info
 
-                    for dep in package.requires:
-                        if dep not in pkg.requires:
-                            pkg.add_dependency(dep)
+        return packages
 
-        return packages, depths
-
-    def _solve(self) -> tuple[list[Package], list[int]]:
+    def _solve(self) -> dict[Package, SolverPackageInfo]:
         if self._provider._overrides:
             self._overrides.append(self._provider._overrides)
 
@@ -161,11 +176,13 @@ class Solver:
             raise SolverProblemError(e)
 
         combined_nodes = depth_first_search(PackageNode(self._package, packages))
-        results = dict(aggregate_package_nodes(nodes) for nodes in combined_nodes)
+        results = dict(
+            aggregate_package_nodes(nodes, result.transitive_markers)
+            for nodes in combined_nodes
+        )
 
         # Merging feature packages with base packages
-        final_packages = []
-        depths = []
+        solved_packages = {}
         for package in packages:
             if package.features:
                 for _package in packages:
@@ -190,11 +207,9 @@ class Solver:
                                     # because it includes relevant extras
                                     _dep.marker = dep.marker
             else:
-                final_packages.append(package)
-                depths.append(results[package])
+                solved_packages[package] = results[package]
 
-        # Return the packages in their original order with associated depths
-        return final_packages, depths
+        return solved_packages
 
 
 DFSNodeID = Tuple[str, FrozenSet[str], bool]
@@ -316,12 +331,14 @@ class PackageNode(DFSNode):
         )
 
 
-def aggregate_package_nodes(nodes: list[PackageNode]) -> tuple[Package, int]:
+def aggregate_package_nodes(
+    nodes: list[PackageNode], transitve_markers: dict[str, BaseMarker]
+) -> tuple[Package, SolverPackageInfo]:
     package = nodes[0].package
     depth = max(node.depth for node in nodes)
-    groups: list[str] = []
+    groups: set[str] = set()
     for node in nodes:
-        groups.extend(node.groups)
+        groups.update(node.groups)
 
     optional = all(node.optional for node in nodes)
     for node in nodes:
@@ -330,4 +347,10 @@ def aggregate_package_nodes(nodes: list[PackageNode]) -> tuple[Package, int]:
 
     package.optional = optional
 
-    return package, depth
+    try:
+        marker = transitve_markers[package.name]
+    except KeyError:
+        assert package.is_root()
+        marker = AnyMarker()
+
+    return package, SolverPackageInfo(depth, groups, marker)

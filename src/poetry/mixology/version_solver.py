@@ -9,10 +9,13 @@ from typing import Optional
 from typing import Tuple
 
 from poetry.core.packages.dependency import Dependency
+from poetry.core.version.markers import BaseMarker
+from poetry.core.version.markers import EmptyMarker
 
 from poetry.mixology.failure import SolveFailure
 from poetry.mixology.incompatibility import Incompatibility
 from poetry.mixology.incompatibility_cause import ConflictCause
+from poetry.mixology.incompatibility_cause import DependencyCause
 from poetry.mixology.incompatibility_cause import NoVersionsCause
 from poetry.mixology.incompatibility_cause import RootCause
 from poetry.mixology.partial_solution import PartialSolution
@@ -544,11 +547,29 @@ class VersionSolver:
         """
         decisions = self._solution.decisions
 
+        transitive_markers = self._get_transitive_markers()
+
         return SolverResult(
             self._root,
             [p for p in decisions if not p.is_root()],
+            transitive_markers,
             self._solution.attempted_solutions,
         )
+
+    def _get_transitive_markers(self) -> dict[str, BaseMarker]:
+        transitive_markers: dict[str, BaseMarker] = {}
+        for incompatibility in self._contradicted_incompatibilities:
+            # We are only interested in the transitive markers of dependencies
+            # of the second term of dependency causes.
+            if isinstance(incompatibility.cause, DependencyCause):
+                assert len(incompatibility._terms) == 2
+
+                dep = incompatibility._terms[1].dependency
+                transitive_markers[dep.name] = transitive_markers.get(
+                    dep.name, EmptyMarker()
+                ).union(dep.transitive_marker)
+
+        return transitive_markers
 
     def _add_incompatibility(self, incompatibility: Incompatibility) -> None:
         self._log(f"fact: {incompatibility}")

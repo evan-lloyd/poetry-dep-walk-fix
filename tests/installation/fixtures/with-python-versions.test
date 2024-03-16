@@ -4,6 +4,8 @@ version = "1.0"
 description = ""
 optional = false
 python-versions = "*"
+marker = ""
+groups = ["main"]
 files = []
 
 [[package]]
@@ -12,6 +14,8 @@ version = "1.1"
 description = ""
 optional = false
 python-versions = "*"
+marker = ""
+groups = ["main"]
 files = []
 
 [[package]]
@@ -20,9 +24,11 @@ version = "1.2"
 description = ""
 optional = false
 python-versions = "~2.7 || ^3.3"
+marker = ""
+groups = ["main"]
 files = []
 
 [metadata]
 python-versions = "~2.7 || ^3.4"
-lock-version = "2.0"
+lock-version = "2.1"
 content-hash = "123456789"
