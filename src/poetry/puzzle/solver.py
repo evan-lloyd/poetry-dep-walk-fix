@@ -11,6 +11,7 @@ from typing import Tuple
 from typing import TypeVar
 
 from poetry.core.version.markers import AnyMarker
+from poetry.core.version.markers import EmptyMarker
 
 from poetry.mixology import resolve_version
 from poetry.mixology.failure import SolveFailure
@@ -175,11 +176,11 @@ class Solver:
         except SolveFailure as e:
             raise SolverProblemError(e)
 
-        combined_nodes = depth_first_search(PackageNode(self._package, packages))
-        results = dict(
-            aggregate_package_nodes(nodes, result.transitive_markers)
-            for nodes in combined_nodes
+        combined_nodes, markers = depth_first_search(
+            PackageNode(self._package, packages)
         )
+        results = dict(aggregate_package_nodes(nodes) for nodes in combined_nodes)
+        calculate_markers(results, markers)
 
         # Merging feature packages with base packages
         solved_packages = {}
@@ -233,12 +234,15 @@ class DFSNode:
         return str(self.id)
 
 
-def depth_first_search(source: PackageNode) -> list[list[PackageNode]]:
+def depth_first_search(
+    source: PackageNode,
+) -> tuple[list[list[PackageNode]], dict[Package, dict[Package, BaseMarker]]]:
     back_edges: dict[DFSNodeID, list[PackageNode]] = defaultdict(list)
+    markers: dict[Package, dict[Package, BaseMarker]] = defaultdict(dict)
     visited: set[DFSNodeID] = set()
     topo_sorted_nodes: list[PackageNode] = []
 
-    dfs_visit(source, back_edges, visited, topo_sorted_nodes)
+    dfs_visit(source, back_edges, visited, topo_sorted_nodes, markers)
 
     # Combine the nodes by name
     combined_nodes: dict[str, list[PackageNode]] = defaultdict(list)
@@ -252,7 +256,7 @@ def depth_first_search(source: PackageNode) -> list[list[PackageNode]]:
         if node.name in combined_nodes
     ]
 
-    return combined_topo_sorted_nodes
+    return combined_topo_sorted_nodes, markers
 
 
 def dfs_visit(
@@ -260,14 +264,16 @@ def dfs_visit(
     back_edges: dict[DFSNodeID, list[PackageNode]],
     visited: set[DFSNodeID],
     sorted_nodes: list[PackageNode],
+    markers: dict[Package, dict[Package, BaseMarker]],
 ) -> None:
     if node.id in visited:
         return
     visited.add(node.id)
 
-    for neighbor in node.reachable():
-        back_edges[neighbor.id].append(node)
-        dfs_visit(neighbor, back_edges, visited, sorted_nodes)
+    for out_neighbor in node.reachable():
+        back_edges[out_neighbor.id].append(node)
+        markers[out_neighbor.package][node.package] = out_neighbor.marker
+        dfs_visit(out_neighbor, back_edges, visited, sorted_nodes, markers)
     sorted_nodes.insert(0, node)
 
 
@@ -278,11 +284,13 @@ class PackageNode(DFSNode):
         packages: list[Package],
         previous: PackageNode | None = None,
         dep: Dependency | None = None,
+        marker: BaseMarker | None = None,
     ) -> None:
         self.package = package
         self.packages = packages
 
         self.dep = dep
+        self.marker = marker or AnyMarker()
         self.depth = -1
 
         if not previous:
@@ -314,6 +322,7 @@ class PackageNode(DFSNode):
                             self.packages,
                             self,
                             self.dep or dependency,
+                            dependency.marker,
                         )
                     )
 
@@ -332,7 +341,7 @@ class PackageNode(DFSNode):
 
 
 def aggregate_package_nodes(
-    nodes: list[PackageNode], transitve_markers: dict[str, BaseMarker]
+    nodes: list[PackageNode],
 ) -> tuple[Package, SolverPackageInfo]:
     package = nodes[0].package
     depth = max(node.depth for node in nodes)
@@ -347,10 +356,25 @@ def aggregate_package_nodes(
 
     package.optional = optional
 
-    try:
-        marker = transitve_markers[package.name]
-    except KeyError:
-        assert package.is_root()
-        marker = AnyMarker()
+    # SolverPackageInfo.transitive_marker is updated later,
+    # because the nodes of all packages have to be aggregated first.
+    return package, SolverPackageInfo(depth, groups, AnyMarker())
 
-    return package, SolverPackageInfo(depth, groups, marker)
+
+def calculate_markers(
+    packages: dict[Package, SolverPackageInfo],
+    markers: dict[Package, dict[Package, BaseMarker]],
+) -> None:
+    # group packages by depth
+    packages_by_depth: dict[int, list[Package]] = defaultdict(list)
+    for package, info in packages.items():
+        packages_by_depth[info.depth].append(package)
+
+    # calculate markers from lowest to highest depth
+    for depth in sorted(packages_by_depth):
+        for package in packages_by_depth[depth]:
+            if depth != -1:
+                marker: BaseMarker = EmptyMarker()
+                for pkg, m in markers[package].items():
+                    marker = marker.union(packages[pkg].transitive_marker.intersect(m))
+                packages[package].transitive_marker = marker
