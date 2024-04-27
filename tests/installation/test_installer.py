@@ -244,12 +244,14 @@ def test_run_with_dependencies(
     assert locker.written_data == expected
 
 
+@pytest.mark.parametrize("sync", [True, False])
 def test_run_update_after_removing_dependencies(
     installer: Installer,
     locker: Locker,
     repo: Repository,
     package: ProjectPackage,
     installed: CustomInstalledRepository,
+    sync: bool,
 ) -> None:
     locker.locked(True)
     locker.mock_lock_data(
@@ -303,6 +305,7 @@ def test_run_update_after_removing_dependencies(
     package.add_dependency(Factory.create_dependency("B", "~1.1"))
 
     installer.update(True)
+    installer.requires_synchronization(sync)
     result = installer.run()
     assert result == 0
 
@@ -311,7 +314,7 @@ def test_run_update_after_removing_dependencies(
 
     assert installer.executor.installations_count == 0
     assert installer.executor.updates_count == 0
-    assert installer.executor.removals_count == 1
+    assert installer.executor.removals_count == (1 if sync else 0)
 
 
 def _configure_run_install_dev(
@@ -570,12 +573,14 @@ def test_run_install_removes_locked_packages_if_installed_and_synchronization_is
     assert installer.executor.removals_count == 2
 
 
+@pytest.mark.parametrize("sync", [True, False])
 def test_run_install_removes_no_longer_locked_packages_if_installed(
     installer: Installer,
     locker: Locker,
     repo: Repository,
     package: ProjectPackage,
     installed: CustomInstalledRepository,
+    sync: bool,
 ) -> None:
     package_a = get_package("a", "1.0")
     package_b = get_package("b", "1.1")
@@ -633,12 +638,13 @@ def test_run_install_removes_no_longer_locked_packages_if_installed(
     )
 
     installer.update(True)
+    installer.requires_synchronization(sync)
     result = installer.run()
     assert result == 0
 
     assert installer.executor.installations_count == 0
     assert installer.executor.updates_count == 0
-    assert installer.executor.removals_count == 2
+    assert installer.executor.removals_count == (2 if sync else 0)
 
 
 @pytest.mark.parametrize(
@@ -709,13 +715,9 @@ def test_run_install_with_synchronization(
 
     assert installer.executor.installations_count == 0
     assert installer.executor.updates_count == 0
-    assert 2 + len(managed_reserved_packages) == installer.executor.removals_count
+    assert installer.executor.removals_count == 2
 
-    expected_removals = {
-        package_b.name,
-        package_c.name,
-        *managed_reserved_package_names,
-    }
+    expected_removals = {package_b.name, package_c.name}
 
     assert isinstance(installer.executor, Executor)
     assert {r.name for r in installer.executor.removals} == expected_removals
@@ -765,12 +767,14 @@ def test_run_whitelist_add(
     assert locker.written_data == expected
 
 
+@pytest.mark.parametrize("sync", [True, False])
 def test_run_whitelist_remove(
     installer: Installer,
     locker: Locker,
     repo: Repository,
     package: ProjectPackage,
     installed: CustomInstalledRepository,
+    sync: bool,
 ) -> None:
     locker.locked(True)
     locker.mock_lock_data(
@@ -810,6 +814,7 @@ def test_run_whitelist_remove(
     package.add_dependency(Factory.create_dependency("A", "~1.0"))
 
     installer.update(True)
+    installer.requires_synchronization(sync)
     installer.whitelist(["B"])
 
     result = installer.run()
@@ -819,7 +824,7 @@ def test_run_whitelist_remove(
     assert locker.written_data == expected
     assert installer.executor.installations_count == 1
     assert installer.executor.updates_count == 0
-    assert installer.executor.removals_count == 1
+    assert installer.executor.removals_count == (1 if sync else 0)
 
 
 def test_add_with_sub_dependencies(
@@ -1087,9 +1092,9 @@ def test_run_installs_extras_with_deps_if_requested(
     else:
         # A, B
         expected_installations_count = 0 if is_installed else 2
-        # We only want to uninstall extras if we do a "poetry install" without extras,
-        # not if we do a "poetry update" or "poetry add".
-        expected_removals_count = 2 if is_installed and is_locked else 0
+        # We only want to uninstall extras if we do a "poetry install --sync" without
+        # extras, not if we do a "poetry install", "poetry update" or "poetry add".
+        expected_removals_count = 2 if is_installed and is_locked and do_sync else 0
 
     assert installer.executor.installations_count == expected_installations_count
     assert installer.executor.removals_count == expected_removals_count
@@ -1625,12 +1630,14 @@ def test_run_install_duplicate_dependencies_different_constraints_with_lock(
     assert installer.executor.removals_count == 0
 
 
+@pytest.mark.parametrize("sync", [True, False])
 def test_run_update_uninstalls_after_removal_transitive_dependency(
     installer: Installer,
     locker: Locker,
     repo: Repository,
     package: ProjectPackage,
     installed: CustomInstalledRepository,
+    sync: bool,
 ) -> None:
     locker.locked(True)
     locker.mock_lock_data(
@@ -1678,12 +1685,13 @@ def test_run_update_uninstalls_after_removal_transitive_dependency(
     installed.add_package(get_package("B", "1.0"))
 
     installer.update(True)
+    installer.requires_synchronization(sync)
     result = installer.run()
     assert result == 0
 
     assert installer.executor.installations_count == 0
     assert installer.executor.updates_count == 0
-    assert installer.executor.removals_count == 1
+    assert installer.executor.removals_count == (1 if sync else 0)
 
 
 def test_run_install_duplicate_dependencies_different_constraints_with_lock_update(

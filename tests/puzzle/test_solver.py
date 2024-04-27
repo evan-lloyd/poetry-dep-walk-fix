@@ -136,7 +136,7 @@ def test_solver_remove_if_no_longer_locked(
     solver = Solver(package, pool, [package_a], [package_a], io)
     transaction = solver.solve()
 
-    check_solver_result(transaction, [{"job": "remove", "package": package_a}])
+    check_solver_result(transaction, [])
 
 
 def test_remove_non_installed(

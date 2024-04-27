@@ -299,29 +299,11 @@ class Installer:
 
         with solver.use_environment(self._env):
             ops = solver.solve(use_latest=self._whitelist).calculate_operations(
-                with_uninstalls=self._requires_synchronization,
                 synchronize=self._requires_synchronization,
                 skip_directory=self._skip_directory,
             )
 
-        if not self._requires_synchronization:
-            # If no packages synchronisation has been requested we need
-            # to calculate the uninstall operations
-            from poetry.puzzle.transaction import Transaction
-
-            transaction = Transaction(
-                locked_repository.packages,
-                [(package, 0) for package in lockfile_repo.packages],
-                installed_packages=self._installed_repository.packages,
-                root_package=root,
-            )
-
-            ops = [
-                op
-                for op in transaction.calculate_operations(with_uninstalls=True)
-                if op.job_type == "uninstall"
-            ] + ops
-        else:
+        if self._requires_synchronization:
             ops = uninstalls + ops
 
         # We need to filter operations so that packages

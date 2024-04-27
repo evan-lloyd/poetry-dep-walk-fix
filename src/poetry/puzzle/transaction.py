@@ -12,12 +12,10 @@ if TYPE_CHECKING:
 class Transaction:
     def __init__(
         self,
-        current_packages: list[Package],
         result_packages: list[tuple[Package, int]],
         installed_packages: list[Package] | None = None,
         root_package: Package | None = None,
     ) -> None:
-        self._current_packages = current_packages
         self._result_packages = result_packages
 
         if installed_packages is None:
@@ -28,7 +26,6 @@ class Transaction:
 
     def calculate_operations(
         self,
-        with_uninstalls: bool = True,
         synchronize: bool = False,
         *,
         skip_directory: bool = False,
@@ -80,44 +77,31 @@ class Transaction:
             ):
                 operations.append(Install(result_package, priority=priority))
 
-        if with_uninstalls:
+        if synchronize:
+            result_package_names = {
+                result_package.name for result_package, _ in self._result_packages
+            }
+            # We preserve pip when not managed by poetry, this is done to avoid
+            # externally managed virtual environments causing unnecessary removals.
+            preserved_package_names = {"pip"} - result_package_names
+
             uninstalls: set[str] = set()
-            for current_package in self._current_packages:
-                found = any(
-                    current_package.name == result_package.name
-                    for result_package, _ in self._result_packages
-                )
+            for installed_package in self._installed_packages:
+                if installed_package.name in uninstalls:
+                    continue
 
-                if not found:
-                    for installed_package in self._installed_packages:
-                        if installed_package.name == current_package.name:
-                            uninstalls.add(installed_package.name)
-                            operations.append(Uninstall(current_package))
+                if (
+                    self._root_package
+                    and installed_package.name == self._root_package.name
+                ):
+                    continue
 
-            if synchronize:
-                result_package_names = {
-                    result_package.name for result_package, _ in self._result_packages
-                }
-                # We preserve pip when not managed by poetry, this is done to avoid
-                # externally managed virtual environments causing unnecessary removals.
-                preserved_package_names = {"pip"} - result_package_names
+                if installed_package.name in preserved_package_names:
+                    continue
 
-                for installed_package in self._installed_packages:
-                    if installed_package.name in uninstalls:
-                        continue
-
-                    if (
-                        self._root_package
-                        and installed_package.name == self._root_package.name
-                    ):
-                        continue
-
-                    if installed_package.name in preserved_package_names:
-                        continue
-
-                    if installed_package.name not in result_package_names:
-                        uninstalls.add(installed_package.name)
-                        operations.append(Uninstall(installed_package))
+                if installed_package.name not in result_package_names:
+                    uninstalls.add(installed_package.name)
+                    operations.append(Uninstall(installed_package))
 
         return sorted(
             operations,

@@ -45,7 +45,6 @@ class Solver:
         self._package = package
         self._pool = pool
         self._installed_packages = installed
-        self._locked_packages = locked
         self._io = io
 
         self._provider = Provider(
@@ -95,7 +94,6 @@ class Solver:
                 self._io.write_error_line(f"<warning>Warning: {message}</warning>")
 
         return Transaction(
-            self._locked_packages,
             list(zip(packages, depths)),
             installed_packages=self._installed_packages,
             root_package=self._package,
