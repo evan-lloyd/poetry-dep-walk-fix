@@ -4,6 +4,7 @@ import os
 import shutil
 import zipfile
 
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Iterator
@@ -94,7 +95,7 @@ def env(
     env_dir: Path, site_purelib: Path, site_platlib: Path, src_dir: Path
 ) -> MockEnv:
     class _MockEnv(MockEnv):
-        @property
+        @cached_property
         def paths(self) -> dict[str, str]:
             return {
                 "purelib": site_purelib.as_posix(),

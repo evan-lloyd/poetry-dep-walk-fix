@@ -1,0 +1,6 @@
+[tool.poetry]
+package-mode = false
+
+[tool.poetry.self.plugins]
+my-application-plugin = ">=2.0"
+my-other-plugin = ">=1.0"
