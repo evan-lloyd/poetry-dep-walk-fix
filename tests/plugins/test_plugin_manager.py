@@ -23,6 +23,9 @@ from poetry.plugins import Plugin
 from poetry.plugins.plugin_manager import PluginManager
 from poetry.plugins.plugin_manager import ProjectPluginCache
 from poetry.poetry import Poetry
+from poetry.puzzle.exceptions import SolverProblemError
+from poetry.repositories import Repository
+from poetry.repositories import RepositoryPool
 from poetry.utils.env import Env
 from poetry.utils.env import EnvManager
 from poetry.utils.env import VirtualEnv
@@ -59,6 +62,26 @@ class InvalidPlugin:
 
 
 @pytest.fixture
+def repo() -> Repository:
+    repo = Repository("repo")
+    repo.add_package(Package("my-other-plugin", "1.0"))
+    for version in ("1.0", "2.0"):
+        package = Package("my-application-plugin", version)
+        package.add_dependency(Dependency("some-lib", version))
+        repo.add_package(package)
+        repo.add_package(Package("some-lib", version))
+    return repo
+
+
+@pytest.fixture
+def pool(repo: Repository) -> RepositoryPool:
+    pool = RepositoryPool()
+    pool.add_repository(repo)
+
+    return pool
+
+
+@pytest.fixture
 def system_env(tmp_venv: VirtualEnv, mocker: MockerFixture) -> Env:
     mocker.patch.object(EnvManager, "get_system_env", return_value=tmp_venv)
     return tmp_venv
@@ -80,13 +103,15 @@ def poetry(fixture_dir: FixtureDirGetter, config: Config) -> Poetry:
 
 @pytest.fixture
 def poetry_with_plugins(
-    fixture_dir: FixtureDirGetter, config: Config, tmp_path: Path
+    fixture_dir: FixtureDirGetter, pool: RepositoryPool, tmp_path: Path
 ) -> Poetry:
     orig_path = fixture_dir("project_plugins")
     project_path = tmp_path / "project"
     project_path.mkdir()
     shutil.copy(orig_path / "pyproject.toml", project_path / "pyproject.toml")
-    return Factory().create_poetry(project_path)
+    poetry = Factory().create_poetry(project_path)
+    poetry.set_pool(pool)
+    return poetry
 
 
 @pytest.fixture()
@@ -256,11 +281,14 @@ def test_ensure_plugins_install_missing_plugins(
     mocker: MockerFixture,
 ) -> None:
     cache = ProjectPluginCache(poetry_with_plugins, io)
-    install_mock = mocker.patch.object(cache, "_install")
+    install_spy = mocker.spy(cache, "_install")
+    execute_mock = mocker.patch(
+        "poetry.plugins.plugin_manager.Installer._execute", return_value=0
+    )
 
     cache.ensure_plugins()
 
-    install_mock.assert_called_once_with(
+    install_spy.assert_called_once_with(
         [
             Dependency("my-application-plugin", ">=2.0"),
             Dependency("my-other-plugin", ">=1.0"),
@@ -268,6 +296,12 @@ def test_ensure_plugins_install_missing_plugins(
         system_env,
         [],
     )
+    execute_mock.assert_called_once()
+    assert [repr(op) for op in execute_mock.call_args.args[0] if not op.skipped] == [
+        "<Install some-lib (2.0)>",
+        "<Install my-application-plugin (2.0)>",
+        "<Install my-other-plugin (1.0)>",
+    ]
     assert cache._config_file.exists()
     assert io.fetch_output() == (
         "Ensuring that the Poetry plugins required by the project are available...\n"
@@ -275,7 +309,10 @@ def test_ensure_plugins_install_missing_plugins(
         " but are not installed in Poetry's environment:\n"
         "  - my-application-plugin (>=2.0)\n"
         "  - my-other-plugin (>=1.0)\n"
-        "Installing Poetry plugins only for the current project...\n\n"
+        "Installing Poetry plugins only for the current project...\n"
+        "Updating dependencies\n"
+        "Resolving dependencies...\n\n"
+        "Writing lock file\n\n"
     )
     assert io.fetch_error() == ""
 
@@ -288,25 +325,38 @@ def test_ensure_plugins_install_only_missing_plugins(
     mocker: MockerFixture,
 ) -> None:
     fixture_path = fixture_dir("project_plugins")
-    dist_info = "my_application_plugin-2.0.dist-info"
-    shutil.copytree(fixture_path / dist_info, system_env.purelib / dist_info)
+    for dist_info in (
+        "my_application_plugin-2.0.dist-info",
+        "some_lib-2.0.dist-info",
+    ):
+        shutil.copytree(fixture_path / dist_info, system_env.purelib / dist_info)
     cache = ProjectPluginCache(poetry_with_plugins, io)
-    install_mock = mocker.patch.object(cache, "_install")
+    install_spy = mocker.spy(cache, "_install")
+    execute_mock = mocker.patch(
+        "poetry.plugins.plugin_manager.Installer._execute", return_value=0
+    )
 
     cache.ensure_plugins()
 
-    install_mock.assert_called_once_with(
+    install_spy.assert_called_once_with(
         [Dependency("my-other-plugin", ">=1.0")],
         system_env,
-        [Package("my-application-plugin", "2.0")],
+        [Package("my-application-plugin", "2.0"), Package("some-lib", "2.0")],
     )
+    execute_mock.assert_called_once()
+    assert [repr(op) for op in execute_mock.call_args.args[0] if not op.skipped] == [
+        "<Install my-other-plugin (1.0)>"
+    ]
     assert cache._config_file.exists()
     assert io.fetch_output() == (
         "Ensuring that the Poetry plugins required by the project are available...\n"
         "The following Poetry plugins are required by the project"
         " but are not installed in Poetry's environment:\n"
         "  - my-other-plugin (>=1.0)\n"
-        "Installing Poetry plugins only for the current project...\n\n"
+        "Installing Poetry plugins only for the current project...\n"
+        "Updating dependencies\n"
+        "Resolving dependencies...\n\n"
+        "Writing lock file\n\n"
     )
     assert io.fetch_error() == ""
 
@@ -322,21 +372,32 @@ def test_ensure_plugins_install_overwrite_wrong_version_plugins(
 ) -> None:
     io.set_verbosity(Verbosity.DEBUG if debug_out else Verbosity.NORMAL)
     fixture_path = fixture_dir("project_plugins")
-    dist_info = "my_application_plugin-1.0.dist-info"
-    shutil.copytree(fixture_path / dist_info, system_env.purelib / dist_info)
+    for dist_info in (
+        "my_application_plugin-1.0.dist-info",
+        "some_lib-2.0.dist-info",
+    ):
+        shutil.copytree(fixture_path / dist_info, system_env.purelib / dist_info)
     cache = ProjectPluginCache(poetry_with_plugins, io)
-    install_mock = mocker.patch.object(cache, "_install")
+    install_spy = mocker.spy(cache, "_install")
+    execute_mock = mocker.patch(
+        "poetry.plugins.plugin_manager.Installer._execute", return_value=0
+    )
 
     cache.ensure_plugins()
 
-    install_mock.assert_called_once_with(
+    install_spy.assert_called_once_with(
         [
             Dependency("my-application-plugin", ">=2.0"),
             Dependency("my-other-plugin", ">=1.0"),
         ],
         system_env,
-        [],
+        [Package("some-lib", "2.0")],
     )
+    execute_mock.assert_called_once()
+    assert [repr(op) for op in execute_mock.call_args.args[0] if not op.skipped] == [
+        "<Install my-application-plugin (2.0)>",
+        "<Install my-other-plugin (1.0)>",
+    ]
     assert cache._config_file.exists()
     start = (
         "Ensuring that the Poetry plugins required by the project are available...\n"
@@ -352,14 +413,14 @@ def test_ensure_plugins_install_overwrite_wrong_version_plugins(
         " but are not installed in Poetry's environment:\n"
         "  - my-application-plugin (>=2.0)\n"
         "  - my-other-plugin (>=1.0)\n"
-        "Installing Poetry plugins only for the current project...\n\n"
+        "Installing Poetry plugins only for the current project...\n"
     )
     expected = (start + opt + end) if debug_out else (start + end)
-    assert io.fetch_output() == expected
+    assert io.fetch_output().startswith(expected)
     assert io.fetch_error() == ""
 
 
-def test_ensure_plugins_pin_other_installed_packages(
+def test_ensure_plugins_pins_other_installed_packages(
     poetry_with_plugins: Poetry,
     io: BufferedIO,
     system_env: Env,
@@ -368,26 +429,38 @@ def test_ensure_plugins_pin_other_installed_packages(
 ) -> None:
     fixture_path = fixture_dir("project_plugins")
     for dist_info in (
-        "my_application_plugin-2.0.dist-info",
+        "my_application_plugin-1.0.dist-info",
         "some_lib-1.0.dist-info",
     ):
         shutil.copytree(fixture_path / dist_info, system_env.purelib / dist_info)
     cache = ProjectPluginCache(poetry_with_plugins, io)
-    install_mock = mocker.patch.object(cache, "_install")
-
-    cache.ensure_plugins()
-
-    install_mock.assert_called_once_with(
-        [Dependency("my-other-plugin", ">=1.0")],
-        system_env,
-        [Package("my-application-plugin", "2.0"), Package("some-lib", "1.0")],
+    install_spy = mocker.spy(cache, "_install")
+    execute_mock = mocker.patch(
+        "poetry.plugins.plugin_manager.Installer._execute", return_value=0
     )
-    assert cache._config_file.exists()
+
+    with pytest.raises(SolverProblemError):
+        cache.ensure_plugins()
+
+    install_spy.assert_called_once_with(
+        [
+            Dependency("my-application-plugin", ">=2.0"),
+            Dependency("my-other-plugin", ">=1.0"),
+        ],
+        system_env,
+        # pinned because it might be a dependency of another plugin or Poetry itself
+        [Package("some-lib", "1.0")],
+    )
+    execute_mock.assert_not_called()
+    assert not cache._config_file.exists()
     assert io.fetch_output() == (
         "Ensuring that the Poetry plugins required by the project are available...\n"
         "The following Poetry plugins are required by the project"
         " but are not installed in Poetry's environment:\n"
+        "  - my-application-plugin (>=2.0)\n"
         "  - my-other-plugin (>=1.0)\n"
-        "Installing Poetry plugins only for the current project...\n\n"
+        "Installing Poetry plugins only for the current project...\n"
+        "Updating dependencies\n"
+        "Resolving dependencies...\n"
     )
     assert io.fetch_error() == ""

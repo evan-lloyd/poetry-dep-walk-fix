@@ -279,11 +279,12 @@ class ProjectPluginCache:
         for package in locked_packages:
             repo.add_package(package)
 
+        self._path.mkdir(parents=True, exist_ok=True)
         installer = Installer(
             self._io,
             poetry_env,
             project,
-            Locker(self._path / "poetry.lock", {}),  # TODO: ...
+            Locker(self._path / "poetry.lock", {}),
             self._poetry.pool,
             self._poetry.config,
             repo,
@@ -291,7 +292,7 @@ class ProjectPluginCache:
         installer.update(True)
 
         if installer.run() != 0:
-            raise RuntimeError("Failed to install required Poetry plugins")  # TODO: ...
+            raise RuntimeError("Failed to install required Poetry plugins")
 
     def _write_config(self) -> None:
         self._config_file.parent.mkdir(parents=True, exist_ok=True)
