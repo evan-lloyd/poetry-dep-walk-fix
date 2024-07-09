@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import shutil
 
+from importlib import metadata
+from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import ClassVar
@@ -13,10 +15,12 @@ from cleo.io.buffered_io import BufferedIO
 from cleo.io.outputs.output import Verbosity
 from poetry.core.constraints.version import Version
 from poetry.core.packages.dependency import Dependency
+from poetry.core.packages.file_dependency import FileDependency
 from poetry.core.packages.package import Package
 from poetry.core.packages.project_package import ProjectPackage
 
 from poetry.factory import Factory
+from poetry.installation.wheel_installer import WheelInstaller
 from poetry.packages.locker import Locker
 from poetry.plugins import ApplicationPlugin
 from poetry.plugins import Plugin
@@ -161,6 +165,21 @@ def test_load_plugins_with_invalid_plugin(
 
     with pytest.raises(ValueError):
         manager.load_plugins()
+
+
+def test_add_project_plugin_path(
+    poetry_with_plugins, io: BufferedIO, fixture_dir: FixtureDirGetter
+) -> None:
+    dist_info = "my_application_plugin-2.0.dist-info"
+    cache = ProjectPluginCache(poetry_with_plugins, io)
+    shutil.copytree(fixture_dir("project_plugins") / dist_info, cache._path / dist_info)
+
+    with pytest.raises(PackageNotFoundError):
+        metadata.version("my-application-plugin")
+
+    PluginManager.add_project_plugin_path(poetry_with_plugins.pyproject_path.parent)
+
+    assert metadata.version("my-application-plugin") == "2.0"
 
 
 def test_ensure_plugins_no_plugins_no_output(poetry: Poetry, io: BufferedIO) -> None:
@@ -464,3 +483,43 @@ def test_ensure_plugins_pins_other_installed_packages(
         "Resolving dependencies...\n"
     )
     assert io.fetch_error() == ""
+
+
+@pytest.mark.parametrize("other_version", [False, True])
+def test_project_plugins_are_installed_in_project_folder(
+    poetry_with_plugins: Poetry,
+    io: BufferedIO,
+    system_env: Env,
+    fixture_dir: FixtureDirGetter,
+    other_version: bool,
+) -> None:
+    orig_purelib = system_env.purelib
+    orig_platlib = system_env.platlib
+    wheel_path = (
+        fixture_dir("wheel_with_no_requires_dist") / "demo-0.1.0-py2.py3-none-any.whl"
+    )
+    if other_version:
+        WheelInstaller(system_env).install(wheel_path)
+        dist_info = orig_purelib / "demo-0.1.0.dist-info"
+        metadata = dist_info / "METADATA"
+        metadata.write_text(metadata.read_text().replace("0.1.0", "0.1.2"))
+        dist_info.rename(orig_purelib / "demo-0.1.2.dist-info")
+
+    cache = ProjectPluginCache(poetry_with_plugins, io)
+
+    # just use a file dependency so that we do not have to set up a repository
+    cache._install([FileDependency("demo", wheel_path)], system_env, [])
+
+    project_site_packages = [p.name for p in cache._path.iterdir()]
+    assert "demo" in project_site_packages
+    assert "demo-0.1.0.dist-info" in project_site_packages
+
+    orig_site_packages = [p.name for p in orig_purelib.iterdir()]
+    if other_version:
+        assert "demo" in orig_site_packages
+        assert "demo-0.1.2.dist-info" in orig_site_packages
+        assert "demo-0.1.0.dist-info" not in orig_site_packages
+    else:
+        assert not any(p.startswith("demo") for p in orig_site_packages)
+    if orig_platlib != orig_purelib:
+        assert not any(p.name.startswith("demo") for p in orig_platlib.iterdir())
