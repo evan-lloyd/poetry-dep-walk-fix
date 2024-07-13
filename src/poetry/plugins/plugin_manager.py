@@ -7,6 +7,7 @@ import shutil
 import site
 import sys
 
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Sequence
@@ -63,7 +64,7 @@ class PluginManager:
 
         plugin_path = pyproject_toml.parent / ProjectPluginCache.PATH
         if plugin_path.exists():
-            sys.path.insert(0, str(plugin_path))
+            EnvManager.get_system_env(naive=True).sys_path.insert(0, str(plugin_path))
             site.addsitedir(str(plugin_path))
 
     @classmethod
@@ -112,14 +113,20 @@ class ProjectPluginCache:
         self._io = io
         self._path = poetry.pyproject_path.parent / self.PATH
         self._config_file = self._path / "config.toml"
-        self._config = {
+
+    @property
+    def _plugin_section(self) -> dict[str, Any]:
+        plugins = self._poetry.local_config.get("self", {}).get("plugins", {})
+        assert isinstance(plugins, dict)
+        return plugins
+
+    @cached_property
+    def _config(self) -> dict[str, Any]:
+        return {
             "python": sys.version,
             "poetry": __version__,
             "plugins-hash": hashlib.sha256(
-                json.dumps(
-                    self._poetry.local_config.get("self", {}).get("plugins", {}),
-                    sort_keys=True,
-                ).encode()
+                json.dumps(self._plugin_section, sort_keys=True).encode()
             ).hexdigest(),
         }
 
@@ -128,9 +135,7 @@ class ProjectPluginCache:
 
         # parse project plugins
         plugins = []
-        for name, constraints in (
-            self._poetry.local_config.get("self", {}).get("plugins", {}).items()
-        ):
+        for name, constraints in self._plugin_section.items():
             _constraints = (
                 constraints if isinstance(constraints, list) else [constraints]
             )

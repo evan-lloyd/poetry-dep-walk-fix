@@ -168,7 +168,7 @@ def test_load_plugins_with_invalid_plugin(
 
 
 def test_add_project_plugin_path(
-    poetry_with_plugins, io: BufferedIO, fixture_dir: FixtureDirGetter
+    poetry_with_plugins: Poetry, io: BufferedIO, fixture_dir: FixtureDirGetter
 ) -> None:
     dist_info = "my_application_plugin-2.0.dist-info"
     cache = ProjectPluginCache(poetry_with_plugins, io)

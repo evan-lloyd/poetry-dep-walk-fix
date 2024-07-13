@@ -6,11 +6,11 @@
   "properties": {
     "self": {
       "type": "object",
-      "description": "TODO",
+      "description": "Requirements for Poetry itself.",
       "properties": {
         "plugins": {
           "type": "object",
-          "description": "The dependencies of this dependency group",
+          "description": "Poetry plugins that are required for this project.",
           "$ref": "#/definitions/dependencies",
           "additionalProperties": false
         }
