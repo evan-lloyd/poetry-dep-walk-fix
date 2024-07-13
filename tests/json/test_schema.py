@@ -61,6 +61,18 @@ def test_self_valid() -> None:
     assert Factory.validate(content) == {"errors": [], "warnings": []}
 
 
+def test_self_invalid_plugin() -> None:
+    toml: dict[str, Any] = TOMLFile(FIXTURE_DIR / "self_invalid_plugin.toml").read()
+    content = toml["tool"]["poetry"]
+    assert Factory.validate(content) == {
+        "errors": [
+            "data.self.plugins.foo must be valid exactly by one definition"
+            " (0 matches found)"
+        ],
+        "warnings": [],
+    }
+
+
 def test_dependencies_is_consistent_to_poetry_core_schema() -> None:
     with (SCHEMA_DIR / "poetry.json").open(encoding="utf-8") as f:
         schema = json.load(f)
