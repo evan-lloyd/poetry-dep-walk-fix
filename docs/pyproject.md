@@ -487,9 +487,18 @@ If you publish your package on PyPI, they will appear in the `Project Links` sec
 ## `self`
 
 In this section, you can specify requirements for Poetry itself.
+For example, you can specify a constraint for the Poetry version that is required
+for this project:
 
-You can also specify that a plugin is required for your project:
-You can specify that certain plugins are required for your project:
+```toml
+[tool.poetry.self]
+version = ">=2.0"
+```
+
+If you are using a Poetry version that is not allowed by this constraint,
+an error will be raised.
+
+Further, you can specify that certain plugins are required for your project:
 
 ```toml
 [tool.poetry.self.plugins]

@@ -8,6 +8,11 @@
       "type": "object",
       "description": "Requirements for Poetry itself.",
       "properties": {
+        "version": {
+          "type": "string",
+          "description": "The version constraint for Poetry itself.",
+          "$ref": "#/definitions/dependency"
+        },
         "plugins": {
           "type": "object",
           "description": "Poetry plugins that are required for this project.",
