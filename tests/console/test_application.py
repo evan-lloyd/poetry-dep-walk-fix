@@ -115,10 +115,6 @@ def test_application_project_plugins(
     project_plugin_path = project_path / ProjectPluginCache.PATH
     if with_project_plugins:
         project_plugin_path.mkdir(parents=True)
-        stub = "my_application_plugin"
-        dist_info = "my_application_plugin-2.0.dist-info"
-        for folder in (dist_info, stub):
-            shutil.copytree(orig_dir / folder, project_plugin_path / folder)
 
     with set_project_context(project_path, in_place=True):
         app = Application()

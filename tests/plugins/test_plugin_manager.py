@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import shutil
 
-from importlib import metadata
-from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import ClassVar
@@ -30,9 +28,10 @@ from poetry.poetry import Poetry
 from poetry.puzzle.exceptions import SolverProblemError
 from poetry.repositories import Repository
 from poetry.repositories import RepositoryPool
+from poetry.repositories.installed_repository import InstalledRepository
 from poetry.utils.env import Env
 from poetry.utils.env import EnvManager
-from poetry.utils.env import VirtualEnv
+from poetry.utils.env import MockEnv
 from tests.helpers import mock_metadata_entry_points
 
 
@@ -86,9 +85,10 @@ def pool(repo: Repository) -> RepositoryPool:
 
 
 @pytest.fixture
-def system_env(tmp_venv: VirtualEnv, mocker: MockerFixture) -> Env:
-    mocker.patch.object(EnvManager, "get_system_env", return_value=tmp_venv)
-    return tmp_venv
+def system_env(tmp_path: Path, mocker: MockerFixture) -> Env:
+    env = MockEnv(path=tmp_path, sys_path=[str(tmp_path / "purelib")])
+    mocker.patch.object(EnvManager, "get_system_env", return_value=env)
+    return env
 
 
 @pytest.fixture
@@ -168,18 +168,30 @@ def test_load_plugins_with_invalid_plugin(
 
 
 def test_add_project_plugin_path(
-    poetry_with_plugins: Poetry, io: BufferedIO, fixture_dir: FixtureDirGetter
+    poetry_with_plugins: Poetry,
+    io: BufferedIO,
+    system_env: Env,
+    fixture_dir: FixtureDirGetter,
 ) -> None:
-    dist_info = "my_application_plugin-2.0.dist-info"
+    dist_info_1 = "my_application_plugin-1.0.dist-info"
+    dist_info_2 = "my_application_plugin-2.0.dist-info"
     cache = ProjectPluginCache(poetry_with_plugins, io)
-    shutil.copytree(fixture_dir("project_plugins") / dist_info, cache._path / dist_info)
+    shutil.copytree(
+        fixture_dir("project_plugins") / dist_info_1, cache._path / dist_info_1
+    )
+    shutil.copytree(
+        fixture_dir("project_plugins") / dist_info_2, system_env.purelib / dist_info_2
+    )
 
-    with pytest.raises(PackageNotFoundError):
-        metadata.version("my-application-plugin")
+    assert {
+        f"{p.name} {p.version}" for p in InstalledRepository.load(system_env).packages
+    } == {"my-application-plugin 2.0"}
 
     PluginManager.add_project_plugin_path(poetry_with_plugins.pyproject_path.parent)
 
-    assert metadata.version("my-application-plugin") == "2.0"
+    assert {
+        f"{p.name} {p.version}" for p in InstalledRepository.load(system_env).packages
+    } == {"my-application-plugin 1.0"}
 
 
 def test_ensure_plugins_no_plugins_no_output(poetry: Poetry, io: BufferedIO) -> None:

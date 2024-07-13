@@ -4,7 +4,6 @@ import hashlib
 import json
 import logging
 import shutil
-import site
 import sys
 
 from functools import cached_property
@@ -65,7 +64,6 @@ class PluginManager:
         plugin_path = pyproject_toml.parent / ProjectPluginCache.PATH
         if plugin_path.exists():
             EnvManager.get_system_env(naive=True).sys_path.insert(0, str(plugin_path))
-            site.addsitedir(str(plugin_path))
 
     @classmethod
     def ensure_project_plugins(cls, poetry: Poetry, io: IO) -> None:
