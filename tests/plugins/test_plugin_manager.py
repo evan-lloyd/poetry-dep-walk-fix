@@ -503,13 +503,19 @@ def test_project_plugins_are_installed_in_project_folder(
     io: BufferedIO,
     system_env: Env,
     fixture_dir: FixtureDirGetter,
+    tmp_path: Path,
     other_version: bool,
 ) -> None:
     orig_purelib = system_env.purelib
     orig_platlib = system_env.platlib
-    wheel_path = (
+
+    # make sure that the path dependency is on the same drive (for Windows tests in CI)
+    orig_wheel_path = (
         fixture_dir("wheel_with_no_requires_dist") / "demo-0.1.0-py2.py3-none-any.whl"
     )
+    wheel_path = tmp_path / orig_wheel_path.name
+    shutil.copy(orig_wheel_path, wheel_path)
+
     if other_version:
         WheelInstaller(system_env).install(wheel_path)
         dist_info = orig_purelib / "demo-0.1.0.dist-info"
