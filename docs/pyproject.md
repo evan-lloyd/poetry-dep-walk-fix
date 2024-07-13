@@ -484,6 +484,21 @@ any custom url in the `urls` section.
 
 If you publish your package on PyPI, they will appear in the `Project Links` section.
 
+## `self`
+
+In this section, you can specify requirements for Poetry itself.
+
+You can also specify that a plugin is required for your project:
+You can specify that certain plugins are required for your project:
+
+```toml
+[tool.poetry.self.plugins]
+my-application-plugin = ">=1.0"
+my-plugin = ">=1.0,<2.0"
+```
+
+See [Project plugins]({{< relref "plugins#project-plugins" >}}) for more information.
+
 ## Poetry and PEP-517
 
 [PEP-517](https://www.python.org/dev/peps/pep-0517/) introduces a standard way
