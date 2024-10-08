@@ -81,9 +81,7 @@ class Solver:
             # simplify markers by removing redundant information
             for transitive_info in packages.values():
                 for group, marker in transitive_info.markers.items():
-                    transitive_info.markers[group] = simplify_marker(
-                        marker, self._package.python_constraint
-                    )
+                    transitive_info.markers[group] = marker
             end = time.time()
 
             if len(self._overrides) > 1:
